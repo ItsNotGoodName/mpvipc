@@ -7,7 +7,7 @@ import (
 
 func ExampleConnection_Call() {
 	conn := NewConnection("/tmp/mpv_socket")
-	err := conn.Open()
+	err := conn.Open(make(chan<- *Event))
 	if err != nil {
 		fmt.Print(err)
 		return
@@ -44,7 +44,7 @@ func ExampleConnection_Call() {
 
 func ExampleConnection_Set() {
 	conn := NewConnection("/tmp/mpv_socket")
-	err := conn.Open()
+	err := conn.Open(make(chan<- *Event))
 	if err != nil {
 		fmt.Print(err)
 		return
@@ -68,7 +68,7 @@ func ExampleConnection_Set() {
 
 func ExampleConnection_Get() {
 	conn := NewConnection("/tmp/mpv_socket")
-	err := conn.Open()
+	err := conn.Open(make(chan<- *Event))
 	if err != nil {
 		fmt.Print(err)
 		return
@@ -96,44 +96,10 @@ func ExampleConnection_Get() {
 	}
 }
 
-func ExampleConnection_ListenForEvents() {
+func ExampleConnection() {
 	conn := NewConnection("/tmp/mpv_socket")
-	err := conn.Open()
-	if err != nil {
-		fmt.Print(err)
-		return
-	}
-	defer func() {
-		_ = conn.Close()
-	}()
-
-	_, err = conn.Call("observe_property", 42, "volume")
-	if err != nil {
-		fmt.Print(err)
-	}
-
 	events := make(chan *Event)
-	stop := make(chan struct{})
-	go conn.ListenForEvents(events, stop)
-
-	// print all incoming events for 5 seconds, then exit
-	go func() {
-		time.Sleep(time.Second * 5)
-		stop <- struct{}{}
-	}()
-
-	for event := range events {
-		if event.ID == 42 {
-			fmt.Printf("volume now is %f\n", event.Data.(float64))
-		} else {
-			fmt.Printf("received event: %s\n", event.Name)
-		}
-	}
-}
-
-func ExampleConnection_NewEventListener() {
-	conn := NewConnection("/tmp/mpv_socket")
-	err := conn.Open()
+	err := conn.Open(events)
 	if err != nil {
 		fmt.Print(err)
 		return
@@ -147,12 +113,10 @@ func ExampleConnection_NewEventListener() {
 		fmt.Print(err)
 	}
 
-	events, stop := conn.NewEventListener()
-
 	// print all incoming events for 5 seconds, then exit
 	go func() {
 		time.Sleep(time.Second * 5)
-		stop <- struct{}{}
+		conn.Close()
 	}()
 
 	for event := range events {
@@ -166,21 +130,14 @@ func ExampleConnection_NewEventListener() {
 
 func ExampleConnection_WaitUntilClosed() {
 	conn := NewConnection("/tmp/mpv_socket")
-	err := conn.Open()
+	events := make(chan *Event)
+	err := conn.Open(events)
 	if err != nil {
 		fmt.Print(err)
 		return
 	}
 	defer func() {
 		_ = conn.Close()
-	}()
-
-	events, stop := conn.NewEventListener()
-
-	// print events until mpv exits, then exit
-	go func() {
-		conn.WaitUntilClosed()
-		stop <- struct{}{}
 	}()
 
 	for event := range events {

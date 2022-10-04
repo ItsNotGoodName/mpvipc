@@ -19,9 +19,6 @@ type Connection struct {
 	lastRequest     uint
 	waitingRequests map[uint]chan *commandResult
 
-	lastListener   uint
-	eventListeners map[uint]chan<- *Event
-
 	lastCloseWaiter uint
 	closeWaiters    map[uint]chan struct{}
 
@@ -98,7 +95,6 @@ func NewConnection(socketName string) *Connection {
 		socketName:      socketName,
 		lock:            &sync.Mutex{},
 		waitingRequests: make(map[uint]chan *commandResult),
-		eventListeners:  make(map[uint]chan<- *Event),
 		closeWaiters:    make(map[uint]chan struct{}),
 	}
 }
@@ -106,7 +102,7 @@ func NewConnection(socketName string) *Connection {
 // Open connects to the socket. Returns an error if already connected.
 // It also starts listening to events, so ListenForEvents() can be called
 // afterwards.
-func (c *Connection) Open() error {
+func (c *Connection) Open(eventListener chan<- *Event) error {
 	c.lock.Lock()
 	defer c.lock.Unlock()
 
@@ -118,40 +114,9 @@ func (c *Connection) Open() error {
 		return fmt.Errorf("can't connect to mpv's socket: %s", err)
 	}
 	c.client = client
-	go c.listen()
+
+	go c.listen(eventListener)
 	return nil
-}
-
-// ListenForEvents blocks until something is received on the stop channel (or
-// it's closed).
-// In the mean time, events received on the socket will be sent on the events
-// channel. They may not appear in the same order they happened in.
-//
-// The events channel is closed automatically just before this method returns.
-func (c *Connection) ListenForEvents(events chan<- *Event, stop <-chan struct{}) {
-	c.lock.Lock()
-	c.lastListener++
-	id := c.lastListener
-	c.eventListeners[id] = events
-	c.lock.Unlock()
-
-	<-stop
-
-	c.lock.Lock()
-	delete(c.eventListeners, id)
-	close(events)
-	c.lock.Unlock()
-}
-
-// NewEventListener is a convenience wrapper around ListenForEvents(). It
-// creates and returns the event channel and the stop channel. After calling
-// NewEventListener, read events from the events channel and send an empty
-// struct to the stop channel to close it.
-func (c *Connection) NewEventListener() (chan *Event, chan struct{}) {
-	events := make(chan *Event)
-	stop := make(chan struct{})
-	go c.ListenForEvents(events, stop)
-	return events, stop
 }
 
 // Call calls an arbitrary command and returns its result. For a list of
@@ -285,48 +250,32 @@ type commandResult struct {
 	ID     uint        `json:"request_id"`
 }
 
-func (c *Connection) checkResult(data []byte) {
-	result := &commandResult{}
-	err := json.Unmarshal(data, &result)
-	if err != nil {
-		return // skip malformed data
-	}
-	if result.Status == "" {
-		return // not a result
-	}
-	c.lock.Lock()
-	request, ok := c.waitingRequests[result.ID]
-	c.lock.Unlock()
-	if ok {
-		request <- result
-	}
-}
-
-func (c *Connection) checkEvent(data []byte) {
-	event := &Event{}
-	err := json.Unmarshal(data, &event)
-	if err != nil {
-		return // skip malformed data
-	}
-	if event.Name == "" {
-		return // not an event
-	}
-	c.lock.Lock()
-	for listenerID := range c.eventListeners {
-		listener := c.eventListeners[listenerID]
-		go func() {
-			listener <- event
-		}()
-	}
-	c.lock.Unlock()
-}
-
-func (c *Connection) listen() {
+func (c *Connection) listen(eventListener chan<- *Event) {
 	scanner := bufio.NewScanner(c.client)
 	for scanner.Scan() {
 		data := scanner.Bytes()
-		c.checkEvent(data)
-		c.checkResult(data)
+
+		// Event
+		event := &Event{}
+		if err := json.Unmarshal(data, &event); err == nil && event.Name != "" {
+			select {
+			case eventListener <- event:
+			default:
+			}
+			continue
+		}
+
+		// Result
+		result := &commandResult{}
+		if err := json.Unmarshal(data, &result); err == nil && result.Status != "" {
+			c.lock.Lock()
+			request, ok := c.waitingRequests[result.ID]
+			c.lock.Unlock()
+			if ok {
+				request <- result
+			}
+		}
 	}
+	close(eventListener)
 	_ = c.Close()
 }
