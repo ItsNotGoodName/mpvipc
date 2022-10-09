@@ -7,7 +7,7 @@ import (
 
 func ExampleConnection_Call() {
 	conn := NewConnection("/tmp/mpv_socket")
-	err := conn.Open(make(chan<- *Event))
+	_, err := conn.Open(0)
 	if err != nil {
 		fmt.Print(err)
 		return
@@ -44,7 +44,7 @@ func ExampleConnection_Call() {
 
 func ExampleConnection_Set() {
 	conn := NewConnection("/tmp/mpv_socket")
-	err := conn.Open(make(chan<- *Event))
+	_, err := conn.Open(0)
 	if err != nil {
 		fmt.Print(err)
 		return
@@ -68,7 +68,7 @@ func ExampleConnection_Set() {
 
 func ExampleConnection_Get() {
 	conn := NewConnection("/tmp/mpv_socket")
-	err := conn.Open(make(chan<- *Event))
+	_, err := conn.Open(0)
 	if err != nil {
 		fmt.Print(err)
 		return
@@ -98,8 +98,7 @@ func ExampleConnection_Get() {
 
 func ExampleConnection() {
 	conn := NewConnection("/tmp/mpv_socket")
-	events := make(chan *Event)
-	err := conn.Open(events)
+	events, err := conn.Open(0)
 	if err != nil {
 		fmt.Print(err)
 		return
@@ -130,8 +129,7 @@ func ExampleConnection() {
 
 func ExampleConnection_WaitUntilClosed() {
 	conn := NewConnection("/tmp/mpv_socket")
-	events := make(chan *Event)
-	err := conn.Open(events)
+	events, err := conn.Open(0)
 	if err != nil {
 		fmt.Print(err)
 		return

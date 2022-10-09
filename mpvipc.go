@@ -99,24 +99,23 @@ func NewConnection(socketName string) *Connection {
 	}
 }
 
-// Open connects to the socket. Returns an error if already connected.
-// It also starts listening to events, so ListenForEvents() can be called
-// afterwards.
-func (c *Connection) Open(eventListener chan<- *Event) error {
+// Open connects to the socket and starts listening for events. Returns an error if already connected.
+func (c *Connection) Open(eventBuffer int) (<-chan *Event, error) {
 	c.lock.Lock()
 	defer c.lock.Unlock()
 
 	if c.client != nil {
-		return fmt.Errorf("already open")
+		return nil, fmt.Errorf("already open")
 	}
 	client, err := dial(c.socketName)
 	if err != nil {
-		return fmt.Errorf("can't connect to mpv's socket: %s", err)
+		return nil, fmt.Errorf("can't connect to mpv's socket: %s", err)
 	}
 	c.client = client
 
+	eventListener := make(chan *Event, eventBuffer)
 	go c.listen(eventListener)
-	return nil
+	return eventListener, nil
 }
 
 // Call calls an arbitrary command and returns its result. For a list of
