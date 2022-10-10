@@ -127,7 +127,11 @@ func (c *Connection) Call(arguments ...interface{}) (interface{}, error) {
 	id := c.lastRequest
 	resultChannel := make(chan *commandResult)
 	c.waitingRequests[id] = resultChannel
+	client := c.client
 	c.lock.Unlock()
+	if client == nil {
+		return nil, fmt.Errorf("trying to send command on closed mpv client")
+	}
 
 	defer func() {
 		c.lock.Lock()
@@ -136,7 +140,7 @@ func (c *Connection) Call(arguments ...interface{}) (interface{}, error) {
 		c.lock.Unlock()
 	}()
 
-	err := c.sendCommand(id, arguments...)
+	err := sendCommand(client, id, arguments...)
 	if err != nil {
 		return nil, err
 	}
@@ -189,14 +193,17 @@ func (c *Connection) Close() error {
 // It's ok to use IsClosed() to check if you need to reopen the connection
 // before calling a command.
 func (c *Connection) IsClosed() bool {
-	return c.client == nil
+	c.lock.Lock()
+	closed := c.client == nil
+	c.lock.Unlock()
+	return closed
 }
 
 // WaitUntilClosed blocks until the connection becomes closed. See IsClosed()
 // for an explanation of the closed state.
 func (c *Connection) WaitUntilClosed() {
 	c.lock.Lock()
-	if c.IsClosed() {
+	if c.client == nil {
 		c.lock.Unlock()
 		return
 	}
@@ -215,10 +222,7 @@ func (c *Connection) WaitUntilClosed() {
 	c.lock.Unlock()
 }
 
-func (c *Connection) sendCommand(id uint, arguments ...interface{}) error {
-	if c.client == nil {
-		return fmt.Errorf("trying to send command on closed mpv client")
-	}
+func sendCommand(client net.Conn, id uint, arguments ...interface{}) error {
 	message := &commandRequest{
 		Arguments: arguments,
 		ID:        id,
@@ -227,13 +231,10 @@ func (c *Connection) sendCommand(id uint, arguments ...interface{}) error {
 	if err != nil {
 		return fmt.Errorf("can't encode command: %s", err)
 	}
-	_, err = c.client.Write(data)
+	data = append(data, []byte("\n")...)
+	_, err = client.Write(data)
 	if err != nil {
 		return fmt.Errorf("can't write command: %s", err)
-	}
-	_, err = c.client.Write([]byte("\n"))
-	if err != nil {
-		return fmt.Errorf("can't terminate command: %s", err)
 	}
 	return err
 }
